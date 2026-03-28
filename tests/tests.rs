@@ -2,18 +2,26 @@
 extern crate libc;
 
 use std::fs;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
+
+struct ChildGuard(Child);
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+    }
+}
 
 #[test]
 #[cfg(target_os = "linux")]
 fn test_valid() {
-    let mut child = Command::new("mosquitto")
+    let mut child = ChildGuard(Command::new("mosquitto")
         .args(&["-c", "tests/mosquitto_valid.conf"])
         .stdout(Stdio::piped())
         .spawn()
-        .unwrap();
+        .unwrap());
 
     thread::sleep(Duration::from_secs(3));
 
@@ -41,19 +49,18 @@ fn test_valid() {
                    .unwrap()
                    .stderr[..], b"Connection error: Connection Refused: not authorised.\n"[..]);
 
-    assert!(child.try_wait().unwrap().is_none());
-    child.kill().unwrap();
+    assert!(child.0.try_wait().unwrap().is_none());
 }
 
 #[test]
 #[cfg(target_os = "linux")]
 fn test_valid_jwks() {
     fs::copy("tests/jwks.json", "jwks_test.json").unwrap();
-    let mut child = Command::new("mosquitto")
+    let mut child = ChildGuard(Command::new("mosquitto")
         .args(&["-c", "tests/mosquitto_valid_jwks.conf"])
         .stdout(Stdio::piped())
         .spawn()
-        .unwrap();
+        .unwrap());
 
     thread::sleep(Duration::from_secs(3));
 
@@ -73,7 +80,7 @@ fn test_valid_jwks() {
 
     // reload mosquitto config
     unsafe {
-        libc::kill(child.id() as i32, libc::SIGHUP);
+        libc::kill(child.0.id() as i32, libc::SIGHUP);
     }
     thread::sleep(Duration::from_secs(3));
 
@@ -89,8 +96,7 @@ fn test_valid_jwks() {
                    .unwrap()
                    .stderr[..], b""[..]);
 
-    assert!(child.try_wait().unwrap().is_none());
-    child.kill().unwrap();
+    assert!(child.0.try_wait().unwrap().is_none());
     fs::remove_file("jwks_test.json").unwrap();
 }
 
